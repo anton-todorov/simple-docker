@@ -1,0 +1,67 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+$jenkinsscript = <<JENKINSINSTALL
+echo "* Upgrading binaries..."
+sudo apt-get update && sudo apt upgrade -y
+echo "* Installing Java..."
+sudo apt install -y openjdk-11-jdk-headless gnupg2 software-properties-common sshpass
+echo "* Installing Jenkins..."
+wget -q -O - https://pkg.jenkins.io/debian/jenkins.io.key | sudo apt-key add -
+sudo sh -c 'echo deb http://pkg.jenkins-ci.org/debian binary/ > /etc/apt/sources.list.d/jenkins.list'
+sudo add-apt-repository universe
+sudo apt-get update && sudo apt upgrade -y
+sudo apt-get install -y jenkins
+sudo systemctl enable --now jenkins
+echo "* Setting a password to "jenkins" user..."
+echo -e "jenkins\njenkins" | sudo passwd jenkins
+JENKINSINSTALL
+
+# git apache2
+
+$dockerscript = <<DOCKERINSTALL
+echo "* Upgrading binaries..."
+sudo apt-get update && sudo apt upgrade -y
+echo "* Installing Docker..."
+sudo apt install -y docker.io curl
+sudo curl -L "https://github.com/docker/compose/releases/download/1.25.5/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+DOCKERINSTALL
+
+Vagrant.configure(2) do |config|
+    
+  config.ssh.insert_key = false
+
+  config.vm.define "master" do |master|
+    master.vm.box="ubuntu-minimal"
+    master.vm.hostname = "master.dob.lab"
+    master.vm.network "private_network", ip: "192.168.99.100"
+#    master.vm.network "forwarded_port", guest: 80, host: 80
+    master.vm.network "forwarded_port", guest: 8080, host: 8080
+    master.vm.provision "shell", inline: $jenkinsscript, privileged: true
+#    master.vm.synced_folder ".", "/vagrant"
+    master.vm.provider "virtualbox" do |master|
+      master.name = "Master"
+      master.memory = "1024"
+    end
+    master.vm.provision :hosts do |master|
+      master.add_host '192.168.99.101', ['slave.dob.lab', 'slave']
+    end
+  end
+  
+  config.vm.define "slave" do |slave|
+    slave.vm.box = "ubuntu-minimal"
+    slave.vm.hostname = "slave.dob.lab"
+    slave.vm.network "private_network", ip: "192.168.99.101"
+    slave.vm.network "forwarded_port", guest: 80, host: 8088
+    slave.vm.provision "shell", inline: $dockerscript, privileged: true
+    slave.vm.provision :hosts do |slave|
+      slave.add_host '192.168.99.100', ['master.dob.lab', 'master']
+    end
+    slave.vm.provider "virtualbox" do |slave|
+      slave.name = "Slave"
+      slave.memory = "1024"
+    end
+  end
+ 
+end
